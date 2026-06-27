@@ -24,7 +24,10 @@ export const TTL = {
   QUEUE_MAX_WAIT_SECONDS: 300,       // 5 minutes
   MATCH_SESSION_BUFFER_SECONDS: 30,  // extra TTL beyond session expiresAt
   MATCH_LOCK_SECONDS: 15,            // must outlast Postgres write + Redis write
-  MATCH_SESSION_SECONDS: 180,        // 3-minute anonymous match window
+  MATCH_SESSION_SECONDS: {
+    TEXT:  180,  // 3 minutes
+    VOICE: 300,  // 5 minutes
+  },
 } as const;
 
 export const MATCH_ENGINE = {

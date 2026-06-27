@@ -185,7 +185,8 @@ export class MatchingEngineService implements OnModuleDestroy {
     profileA: CandidateProfile,
     profileB: CandidateProfile,
   ): Promise<void> {
-    const expiresAt = new Date(Date.now() + TTL.MATCH_SESSION_SECONDS * 1_000);
+    const sessionDurationSec = TTL.MATCH_SESSION_SECONDS[type];
+    const expiresAt = new Date(Date.now() + sessionDurationSec * 1_000);
     let session: { id: string; startedAt: Date; expiresAt: Date } | null = null;
 
     // ── Phase 1: Postgres write (guarded transaction) ────────────────────────
@@ -223,7 +224,7 @@ export class MatchingEngineService implements OnModuleDestroy {
 
     // ── Phase 2: Redis state (after Postgres commit) ─────────────────────────
     // If this block fails → we rollback the Postgres row to restore clean state.
-    const sessionTtl = TTL.MATCH_SESSION_SECONDS + TTL.MATCH_SESSION_BUFFER_SECONDS;
+    const sessionTtl = sessionDurationSec + TTL.MATCH_SESSION_BUFFER_SECONDS;
     try {
       await this.redis.hset(REDIS_KEYS.matchSession(session.id), {
         userAId,
