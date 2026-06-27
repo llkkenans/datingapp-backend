@@ -1,0 +1,294 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Connection URL is configured in prisma.config.ts (Prisma v7 requirement)
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum AuthProvider {
+  GOOGLE
+  APPLE
+  EMAIL
+  PHONE
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  BANNED
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum PreferredGender {
+  MALE
+  FEMALE
+  OTHER
+  ANY
+}
+
+enum MatchType {
+  TEXT
+  VOICE
+}
+
+enum MatchStatus {
+  PENDING
+  ACTIVE
+  MUTUAL_LIKE
+  ENDED
+  EXPIRED
+}
+
+enum MessageStatus {
+  SENT
+  DELIVERED
+  READ
+}
+
+enum ReportTargetType {
+  USER
+  MESSAGE
+  POST
+  COMMENT
+}
+
+// ─── Models ───────────────────────────────────────────────────────────────────
+
+model User {
+  id           String     @id @default(uuid())
+  email        String?    @unique
+  phone        String?    @unique
+  authProvider AuthProvider
+  status       UserStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now())
+
+  profile Profile?
+
+  // A user appears as either side of a match session
+  matchSessionsAsA MatchSession[] @relation("MatchUserA")
+  matchSessionsAsB MatchSession[] @relation("MatchUserB")
+
+  // A user appears as either side of a conversation
+  conversationsAsA Conversation[] @relation("ConversationUserA")
+  conversationsAsB Conversation[] @relation("ConversationUserB")
+
+  sentMessages  Message[]      @relation("MessageSender")
+  discoverPosts DiscoverPost[]
+  comments      Comment[]
+  likes         Like[]
+
+  blocksGiven    Block[] @relation("BlockGiver")
+  blocksReceived Block[] @relation("BlockReceiver")
+
+  reportsGiven Report[] @relation("ReportGiver")
+
+  ratingsGiven    Rating[] @relation("RatingGiver")
+  ratingsReceived Rating[] @relation("RatingReceiver")
+
+  @@index([status])
+  @@index([authProvider])
+}
+
+model Profile {
+  id                  String          @id @default(uuid())
+  userId              String          @unique
+  username            String          @unique
+  birthDate           DateTime
+  gender              Gender
+  preferredGender     PreferredGender
+  city                String
+  avatarUrl           String?
+  bio                 String?
+  qualityScore        Float           @default(0)
+  onboardingCompleted Boolean         @default(false)
+  updatedAt           DateTime        @updatedAt
+
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  interests UserInterest[]
+
+  @@index([city])
+  @@index([gender])
+  @@index([preferredGender])
+  @@index([qualityScore])
+  @@index([onboardingCompleted])
+}
+
+model Interest {
+  id   String @id @default(uuid())
+  name String @unique
+
+  users UserInterest[]
+}
+
+// Explicit join table: Profile <-> Interest
+model UserInterest {
+  userId     String
+  interestId String
+
+  // userId here equals Profile.userId (and User.id) — Profile.userId is @unique
+  profile  Profile  @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  interest Interest @relation(fields: [interestId], references: [id], onDelete: Cascade)
+
+  @@id([userId, interestId])
+  @@index([interestId])
+}
+
+model MatchSession {
+  id         String      @id @default(uuid())
+  userAId    String
+  userBId    String
+  type       MatchType
+  status     MatchStatus @default(PENDING)
+  startedAt  DateTime    @default(now())
+  expiresAt  DateTime
+  userALiked Boolean     @default(false)
+  userBLiked Boolean     @default(false)
+
+  userA User @relation("MatchUserA", fields: [userAId], references: [id])
+  userB User @relation("MatchUserB", fields: [userBId], references: [id])
+
+  // A match session optionally produces one conversation
+  conversation Conversation?
+  ratings      Rating[]
+
+  @@index([userAId])
+  @@index([userBId])
+  @@index([status])
+  @@index([expiresAt])
+}
+
+model Conversation {
+  id                   String    @id @default(uuid())
+  userAId              String
+  userBId              String
+  originMatchSessionId String?   @unique
+  createdAt            DateTime  @default(now())
+  lastMessageAt        DateTime?
+
+  userA              User          @relation("ConversationUserA", fields: [userAId], references: [id])
+  userB              User          @relation("ConversationUserB", fields: [userBId], references: [id])
+  originMatchSession MatchSession? @relation(fields: [originMatchSessionId], references: [id])
+
+  messages Message[]
+
+  @@index([userAId])
+  @@index([userBId])
+  @@index([lastMessageAt])
+}
+
+model Message {
+  id             String        @id @default(uuid())
+  conversationId String
+  senderId       String
+  content        String?
+  photoUrl       String?
+  status         MessageStatus @default(SENT)
+  createdAt      DateTime      @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User         @relation("MessageSender", fields: [senderId], references: [id])
+
+  @@index([conversationId])
+  @@index([senderId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model DiscoverPost {
+  id          String   @id @default(uuid())
+  userId      String
+  textContent String?
+  photoUrl    String?
+  createdAt   DateTime @default(now())
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  comments Comment[]
+  likes    Like[]
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  postId    String
+  userId    String
+  content   String
+  createdAt DateTime @default(now())
+
+  post DiscoverPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [userId], references: [id])
+
+  @@index([postId])
+  @@index([userId])
+}
+
+model Like {
+  id        String   @id @default(uuid())
+  postId    String
+  userId    String
+  createdAt DateTime @default(now())
+
+  post DiscoverPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [userId], references: [id])
+
+  @@unique([postId, userId])
+  @@index([postId])
+}
+
+model Block {
+  id        String   @id @default(uuid())
+  blockerId String
+  blockedId String
+  createdAt DateTime @default(now())
+
+  blocker User @relation("BlockGiver", fields: [blockerId], references: [id])
+  blocked User @relation("BlockReceiver", fields: [blockedId], references: [id])
+
+  @@unique([blockerId, blockedId])
+  @@index([blockerId])
+  @@index([blockedId])
+}
+
+model Report {
+  id         String           @id @default(uuid())
+  reporterId String
+  targetType ReportTargetType
+  // Polymorphic target — no FK since target can be User, Message, Post, or Comment
+  targetId   String
+  reason     String
+  createdAt  DateTime         @default(now())
+
+  reporter User @relation("ReportGiver", fields: [reporterId], references: [id])
+
+  @@index([reporterId])
+  // Composite index for looking up all reports against a specific target
+  @@index([targetType, targetId])
+}
+
+model Rating {
+  id             String   @id @default(uuid())
+  matchSessionId String
+  raterId        String
+  ratedId        String
+  stars          Int
+  createdAt      DateTime @default(now())
+
+  matchSession MatchSession @relation(fields: [matchSessionId], references: [id])
+  rater        User         @relation("RatingGiver", fields: [raterId], references: [id])
+  rated        User         @relation("RatingReceiver", fields: [ratedId], references: [id])
+
+  // Each user can only rate the other person once per match session
+  @@unique([matchSessionId, raterId])
+  @@index([ratedId])
+  @@index([matchSessionId])
+}

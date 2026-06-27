@@ -1,0 +1,103 @@
+import { Logger } from '@nestjs/common';
+import {
+  OnGatewayConnection,
+  OnGatewayDisconnect,
+  OnGatewayInit,
+  WebSocketGateway,
+  WebSocketServer,
+} from '@nestjs/websockets';
+import { Server, Socket } from 'socket.io';
+
+// ─── Event name constants (contract shared with Terminal C / Flutter) ─────────
+
+export const MESSAGING_EVENTS = {
+  // Server → client
+  MESSAGE_NEW: 'message.new',
+  MESSAGE_READ: 'message.read',
+
+  // Client → server
+  TYPING_START: 'message.typing.start',
+  TYPING_STOP: 'message.typing.stop',
+} as const;
+
+// ─── Payload shapes ───────────────────────────────────────────────────────────
+
+export interface MessageNewPayload {
+  conversationId: string;
+  message: {
+    id: string;
+    senderId: string;
+    content: string | null;
+    photoUrl: string | null;
+    status: string;
+    createdAt: string;
+  };
+}
+
+export interface MessageReadPayload {
+  conversationId: string;
+  readUpToMessageId: string;
+  readAt: string;
+}
+
+// ─── Gateway ──────────────────────────────────────────────────────────────────
+
+@WebSocketGateway({
+  cors: { origin: '*' },
+  namespace: '/messages',
+})
+export class MessagingGateway
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
+{
+  private readonly logger = new Logger(MessagingGateway.name);
+
+  @WebSocketServer()
+  private server!: Server;
+
+  // userId → socketId — single-device assumption (see D-010)
+  private readonly userSocketMap = new Map<string, string>();
+  private readonly socketUserMap = new Map<string, string>();
+
+  afterInit(): void {
+    this.logger.log('MessagingGateway initialised on namespace /messages');
+  }
+
+  handleConnection(socket: Socket): void {
+    const userId = socket.handshake.auth?.userId as string | undefined;
+    if (!userId) {
+      socket.disconnect(true);
+      return;
+    }
+    this.userSocketMap.set(userId, socket.id);
+    this.socketUserMap.set(socket.id, userId);
+    this.logger.debug(`User ${userId} connected to /messages (socket ${socket.id})`);
+  }
+
+  handleDisconnect(socket: Socket): void {
+    const userId = this.socketUserMap.get(socket.id);
+    if (userId) {
+      this.userSocketMap.delete(userId);
+      this.socketUserMap.delete(socket.id);
+      this.logger.debug(`User ${userId} disconnected from /messages`);
+    }
+  }
+
+  // ─── Emit helpers (called by MessagesService) ─────────────────────────────
+
+  emitMessageNew(toUserId: string, payload: MessageNewPayload): void {
+    this.emitToUser(toUserId, MESSAGING_EVENTS.MESSAGE_NEW, payload);
+  }
+
+  emitMessageRead(toUserId: string, payload: MessageReadPayload): void {
+    this.emitToUser(toUserId, MESSAGING_EVENTS.MESSAGE_READ, payload);
+  }
+
+  private emitToUser(userId: string, event: string, payload: unknown): void {
+    const socketId = this.userSocketMap.get(userId);
+    if (!socketId) {
+      this.logger.debug(`User ${userId} offline — event ${event} dropped`);
+      return;
+    }
+    this.server.to(socketId).emit(event, payload);
+  }
+}
