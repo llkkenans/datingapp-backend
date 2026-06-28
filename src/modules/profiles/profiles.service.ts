@@ -2,10 +2,12 @@ import {
   Injectable,
   BadRequestException,
   ConflictException,
+  NotFoundException,
 } from '@nestjs/common';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateProfileDto } from './dto/create-profile.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 
 // Fix: compare in UTC only — birthDate strings like "2006-06-25" are parsed as
 // UTC midnight by the Date constructor; using UTC getter methods avoids off-by-one
@@ -29,9 +31,12 @@ function calculateAge(birthDate: Date): number {
 export class ProfilesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async checkUsernameAvailable(username: string): Promise<boolean> {
+  async checkUsernameAvailable(username: string, excludeUserId?: string): Promise<boolean> {
     const existing = await this.prisma.profile.findFirst({
-      where: { username: { equals: username, mode: 'insensitive' } },
+      where: {
+        username: { equals: username, mode: 'insensitive' },
+        ...(excludeUserId ? { userId: { not: excludeUserId } } : {}),
+      },
     });
     return existing === null;
   }
@@ -107,6 +112,65 @@ export class ProfilesService {
     } catch (err: unknown) {
       // Two users raced past the pre-check with the same username.
       // P2002 = unique constraint violation on Profile.username.
+      if (
+        err instanceof PrismaClientKnownRequestError &&
+        err.code === 'P2002'
+      ) {
+        throw new ConflictException('Username is already taken');
+      }
+      throw err;
+    }
+  }
+
+  async updateProfile(userId: string, dto: UpdateProfileDto) {
+    const profile = await this.prisma.profile.findUnique({ where: { userId } });
+    if (!profile) {
+      throw new NotFoundException('Profile not found');
+    }
+
+    if (dto.username !== undefined) {
+      const available = await this.checkUsernameAvailable(dto.username, userId);
+      if (!available) {
+        throw new ConflictException('Username is already taken');
+      }
+    }
+
+    if (dto.interestIds !== undefined && dto.interestIds.length > 0) {
+      const found = await this.prisma.interest.findMany({
+        where: { id: { in: dto.interestIds } },
+        select: { id: true },
+      });
+      if (found.length !== dto.interestIds.length) {
+        const foundIds = new Set(found.map((i) => i.id));
+        const invalid = dto.interestIds.filter((id) => !foundIds.has(id));
+        throw new BadRequestException(`Invalid interest IDs: ${invalid.join(', ')}`);
+      }
+    }
+
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        if (dto.interestIds !== undefined) {
+          await tx.userInterest.deleteMany({ where: { userId } });
+          if (dto.interestIds.length > 0) {
+            await tx.userInterest.createMany({
+              data: dto.interestIds.map((interestId) => ({ userId, interestId })),
+            });
+          }
+        }
+
+        return tx.profile.update({
+          where: { userId },
+          data: {
+            ...(dto.username !== undefined ? { username: dto.username } : {}),
+            ...(dto.gender !== undefined ? { gender: dto.gender } : {}),
+            ...(dto.preferredGender !== undefined ? { preferredGender: dto.preferredGender } : {}),
+            ...(dto.city !== undefined ? { city: dto.city } : {}),
+            ...(dto.bio !== undefined ? { bio: dto.bio } : {}),
+          },
+          include: { interests: { include: { interest: true } } },
+        });
+      });
+    } catch (err: unknown) {
       if (
         err instanceof PrismaClientKnownRequestError &&
         err.code === 'P2002'

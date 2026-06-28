@@ -1,8 +1,10 @@
 import {
   BadRequestException,
+  Body,
   Controller,
   HttpCode,
   HttpStatus,
+  Patch,
   PayloadTooLargeException,
   Post,
   UnsupportedMediaTypeException,
@@ -23,6 +25,7 @@ import {
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { ProfilesService } from './profiles.service';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import { StorageService, STORAGE_BUCKETS } from '../../storage/storage.service';
 
 const MAX_AVATAR_BYTES = 5 * 1024 * 1024; // 5 MB
@@ -43,6 +46,19 @@ export class ProfilesController {
     private readonly profilesService: ProfilesService,
     private readonly storageService: StorageService,
   ) {}
+
+  @Patch('me')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: "Update the current user's profile fields" })
+  @ApiResponse({ status: 200, description: 'Profile updated successfully' })
+  @ApiResponse({ status: 400, description: 'Validation error or invalid interest IDs' })
+  @ApiResponse({ status: 409, description: 'Username already taken' })
+  async updateProfile(
+    @CurrentUser() userId: string,
+    @Body() dto: UpdateProfileDto,
+  ) {
+    return this.profilesService.updateProfile(userId, dto);
+  }
 
   @Post('me/avatar')
   @HttpCode(HttpStatus.OK)
