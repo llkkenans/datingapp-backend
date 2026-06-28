@@ -2,8 +2,10 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
+  NotFoundException,
   Patch,
   PayloadTooLargeException,
   Post,
@@ -46,6 +48,18 @@ export class ProfilesController {
     private readonly profilesService: ProfilesService,
     private readonly storageService: StorageService,
   ) {}
+
+  @Get('me')
+  @ApiOperation({ summary: "Get the current user's profile" })
+  @ApiResponse({ status: 200, description: 'Profile returned' })
+  @ApiResponse({ status: 404, description: 'Profile not found (onboarding not completed)' })
+  async getMyProfile(@CurrentUser() userId: string) {
+    const profile = await this.profilesService.getProfileByUserId(userId);
+    if (!profile) {
+      throw new NotFoundException('Profile not found');
+    }
+    return profile;
+  }
 
   @Patch('me')
   @HttpCode(HttpStatus.OK)
