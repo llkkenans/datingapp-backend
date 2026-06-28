@@ -6,6 +6,9 @@
  */
 
 import { RedisService } from './redis/redis.service';
+import { validate } from 'class-validator';
+import { Gender, PreferredGender } from '@prisma/client';
+import { CreateProfileDto } from './modules/profiles/dto/create-profile.dto';
 
 // ─── Issue 2: Age calculation (UTC) ──────────────────────────────────────────
 // Extracted from profiles.service.ts for direct unit testing.
@@ -258,5 +261,67 @@ describe('session.message rate-limit — fixed window logic', () => {
       expect(applyRateLimit(n, MAX).setExpiry).toBe(false);
     });
     expect(applyRateLimit(1, MAX).setExpiry).toBe(true);
+  });
+});
+
+// ─── Phase 7 #7: Onboarding enum regression guard ────────────────────────────
+// Regression guard for the NON_BINARY bug: Flutter sent gender:"NON_BINARY" but
+// Prisma only allows "OTHER". @IsEnum(Gender) reads from the generated Prisma
+// client at runtime, so this test automatically reflects any future schema change.
+
+function makeValidDto(overrides: Partial<Record<string, unknown>> = {}): CreateProfileDto {
+  return Object.assign(new CreateProfileDto(), {
+    username: 'test_user',
+    birthDate: '1995-01-01',
+    gender: Gender.MALE,
+    preferredGender: PreferredGender.ANY,
+    city: 'Istanbul',
+    ...overrides,
+  });
+}
+
+describe('CreateProfileDto — enum validation (regression guard)', () => {
+  it('accepts every value in the Prisma Gender enum', async () => {
+    for (const value of Object.values(Gender)) {
+      const errors = await validate(makeValidDto({ gender: value }));
+      const genderErrors = errors.filter((e) => e.property === 'gender');
+      expect(genderErrors).toHaveLength(0);
+    }
+  });
+
+  it('accepts every value in the Prisma PreferredGender enum', async () => {
+    for (const value of Object.values(PreferredGender)) {
+      const errors = await validate(makeValidDto({ preferredGender: value }));
+      const prefErrors = errors.filter((e) => e.property === 'preferredGender');
+      expect(prefErrors).toHaveLength(0);
+    }
+  });
+
+  it('rejects gender:"NON_BINARY" — the exact value that caused the original bug', async () => {
+    const errors = await validate(makeValidDto({ gender: 'NON_BINARY' }));
+    const genderErrors = errors.filter((e) => e.property === 'gender');
+    expect(genderErrors.length).toBeGreaterThan(0);
+  });
+
+  it('rejects preferredGender:"NON_BINARY"', async () => {
+    const errors = await validate(makeValidDto({ preferredGender: 'NON_BINARY' }));
+    const prefErrors = errors.filter((e) => e.property === 'preferredGender');
+    expect(prefErrors.length).toBeGreaterThan(0);
+  });
+
+  it('rejects arbitrary strings for gender', async () => {
+    for (const bad of ['non_binary', 'male', 'UNKNOWN', '', 'null']) {
+      const errors = await validate(makeValidDto({ gender: bad }));
+      const genderErrors = errors.filter((e) => e.property === 'gender');
+      expect(genderErrors.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('rejects arbitrary strings for preferredGender', async () => {
+    for (const bad of ['non_binary', 'female', 'BOTH', '', 'undefined']) {
+      const errors = await validate(makeValidDto({ preferredGender: bad }));
+      const prefErrors = errors.filter((e) => e.property === 'preferredGender');
+      expect(prefErrors.length).toBeGreaterThan(0);
+    }
   });
 });
