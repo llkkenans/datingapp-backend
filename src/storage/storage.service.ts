@@ -10,6 +10,7 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 export const STORAGE_BUCKETS = {
   AVATARS: 'avatars',
   MESSAGE_PHOTOS: 'message-photos',
+  DISCOVER_PHOTOS: 'discover-photos',
 } as const;
 
 @Injectable()
@@ -36,6 +37,7 @@ export class StorageService implements OnModuleInit {
     const buckets = [
       { name: STORAGE_BUCKETS.AVATARS, public: true },
       { name: STORAGE_BUCKETS.MESSAGE_PHOTOS, public: true },
+      { name: STORAGE_BUCKETS.DISCOVER_PHOTOS, public: true },
     ];
 
     for (const bucket of buckets) {
