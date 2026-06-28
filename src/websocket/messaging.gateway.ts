@@ -7,6 +7,8 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
+import { ConfigService } from '@nestjs/config';
+import { buildWsJwtMiddleware } from './ws-jwt.middleware';
 
 // ─── Event name constants (contract shared with Terminal C / Flutter) ─────────
 
@@ -58,16 +60,15 @@ export class MessagingGateway
   private readonly userSocketMap = new Map<string, string>();
   private readonly socketUserMap = new Map<string, string>();
 
+  constructor(private readonly config: ConfigService) {}
+
   afterInit(): void {
     this.logger.log('MessagingGateway initialised on namespace /messages');
+    this.server.use(buildWsJwtMiddleware(this.config));
   }
 
   handleConnection(socket: Socket): void {
-    const userId = socket.handshake.auth?.userId as string | undefined;
-    if (!userId) {
-      socket.disconnect(true);
-      return;
-    }
+    const userId = socket.data.userId; // set by ws-jwt.middleware after token verification
     this.userSocketMap.set(userId, socket.id);
     this.socketUserMap.set(socket.id, userId);
     this.logger.debug(`User ${userId} connected to /messages (socket ${socket.id})`);

@@ -11,8 +11,10 @@ import {
 } from '@nestjs/websockets';
 import { MatchType } from '@prisma/client';
 import { Server, Socket } from 'socket.io';
+import { ConfigService } from '@nestjs/config';
 import { RedisService } from '../redis/redis.service';
 import { REDIS_KEYS, TTL } from '../redis/redis.constants';
+import { buildWsJwtMiddleware } from './ws-jwt.middleware';
 
 // ─── Event name constants (contract shared with Terminal C / Flutter) ─────────
 
@@ -94,20 +96,18 @@ export class MatchGateway
   private readonly userSocketMap = new Map<string, string>();
   private readonly socketUserMap = new Map<string, string>();
 
-  constructor(private readonly redis: RedisService) {}
+  constructor(
+    private readonly redis: RedisService,
+    private readonly config: ConfigService,
+  ) {}
 
   afterInit(): void {
     this.logger.log('MatchGateway initialised on namespace /match');
+    this.server.use(buildWsJwtMiddleware(this.config));
   }
 
   handleConnection(socket: Socket): void {
-    // Auth is validated via JWT middleware in the full WebSocket module.
-    // For now, client sends userId in handshake auth as a placeholder.
-    const userId = socket.handshake.auth?.userId as string | undefined;
-    if (!userId) {
-      socket.disconnect(true);
-      return;
-    }
+    const userId = socket.data.userId; // set by ws-jwt.middleware after token verification
     this.userSocketMap.set(userId, socket.id);
     this.socketUserMap.set(socket.id, userId);
     this.logger.debug(`User ${userId} connected (socket ${socket.id})`);
