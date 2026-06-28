@@ -75,6 +75,16 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     await this.client.hdel(key, ...fields);
   }
 
+  // ── List operations ───────────────────────────────────────────────────────
+
+  async rpush(key: string, ...values: string[]): Promise<void> {
+    await this.client.rpush(key, ...values);
+  }
+
+  async lrange(key: string, start: number, stop: number): Promise<string[]> {
+    return this.client.lrange(key, start, stop);
+  }
+
   // ── Sorted set operations ─────────────────────────────────────────────────
 
   async zadd(key: string, score: number, member: string): Promise<void> {
