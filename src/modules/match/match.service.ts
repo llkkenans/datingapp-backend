@@ -216,11 +216,38 @@ export class MatchService {
         }),
       ]);
 
+      // Migrate anonymous session messages into the new permanent conversation.
+      // lrange is outside the Prisma transaction (Redis can't participate), but
+      // createMany is inside it — a transaction rollback leaves the Redis list
+      // intact, which is safe: the session key cleanup below deletes it anyway.
+      const rawMessages = await this.redis.lrange(
+        REDIS_KEYS.sessionMessages(sessionId),
+        0,
+        -1,
+      );
+      if (rawMessages.length > 0) {
+        const messageRows = rawMessages.map((raw) => {
+          const { senderId, content, sentAt } = JSON.parse(raw) as {
+            senderId: string;
+            content: string;
+            sentAt: string;
+          };
+          return {
+            conversationId: conversation.id,
+            senderId,
+            content,
+            createdAt: new Date(sentAt),
+          };
+        });
+        await tx.message.createMany({ data: messageRows });
+      }
+
       // Clear Redis active-session markers so both users can re-queue
       await Promise.allSettled([
         this.redis.del(REDIS_KEYS.matchSession(sessionId)),
         this.redis.del(REDIS_KEYS.userActiveSession(session.userAId)),
         this.redis.del(REDIS_KEYS.userActiveSession(session.userBId)),
+        this.redis.del(REDIS_KEYS.sessionMessages(sessionId)),
       ]);
 
       this.gateway.emitMutualLike(

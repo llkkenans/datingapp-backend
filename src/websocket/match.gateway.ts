@@ -12,7 +12,7 @@ import {
 import { MatchType } from '@prisma/client';
 import { Server, Socket } from 'socket.io';
 import { RedisService } from '../redis/redis.service';
-import { REDIS_KEYS } from '../redis/redis.constants';
+import { REDIS_KEYS, TTL } from '../redis/redis.constants';
 
 // ─── Event name constants (contract shared with Terminal C / Flutter) ─────────
 
@@ -269,6 +269,21 @@ export class MatchGateway
       sentAt: new Date().toISOString(),
     };
     this.emitToUser(recipientId, WS_EVENTS.SESSION_MESSAGE, relayPayload);
+
+    // Append to Redis list so messages can be migrated into the permanent
+    // Conversation if a mutual like occurs. TTL mirrors the session key so
+    // the list auto-expires with the session when no mutual like happens.
+    const msgKey = REDIS_KEYS.sessionMessages(sessionId);
+    const remainingSec = sessionState['expiresAt']
+      ? Math.ceil(
+          (new Date(sessionState['expiresAt']).getTime() - Date.now()) / 1_000,
+        )
+      : TTL.MATCH_SESSION_SECONDS.TEXT;
+    await this.redis.rpush(
+      msgKey,
+      JSON.stringify({ senderId, content: content.trim(), sentAt: relayPayload.sentAt }),
+    );
+    await this.redis.expire(msgKey, Math.max(remainingSec + TTL.MATCH_SESSION_BUFFER_SECONDS, 60));
 
     this.logger.debug(
       `session.message relayed | session=${sessionId} | to=${recipientId}`,

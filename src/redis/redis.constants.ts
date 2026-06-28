@@ -17,6 +17,9 @@ export const REDIS_KEYS = {
 
   // String — value = userId (next candidate), used by matcher worker
   matchLock: (userId: string) => `match:lock:${userId}`,
+
+  // List — JSON entries {senderId, content, sentAt}, TTL mirrors session TTL
+  sessionMessages: (sessionId: string) => `match:session:${sessionId}:messages`,
 } as const;
 
 export const TTL = {
