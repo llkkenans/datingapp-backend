@@ -88,3 +88,23 @@ The production guard is `=== 'production'` (strict equality). Any value other th
 - Hardcode a shorter cooldown in all environments and revert before deploy (error-prone, easy to forget)
 - Add a separate `DEV_MODE` flag (adds surface area; `NODE_ENV` is the standard signal already)
 - Environment-gate chosen: single source of truth, zero risk to production if `NODE_ENV=production` is set correctly at deploy time
+
+---
+
+## D-024 — birthDate is excluded from PATCH /profiles/me self-service editing
+
+**Date:** 2026-06-29  
+**Affected endpoint:** `PATCH /api/v1/profiles/me`  
+**Files:** `src/modules/profiles/dto/update-profile.dto.ts`
+
+**Decision:** `UpdateProfileDto` does not include a `birthDate` field. Users cannot change their birth date after onboarding completes. Genuine typo corrections must go through admin/support.
+
+**Why:** The initial framing considered the risk of "bypassing the 18+ check," but that framing does not hold up. To pass the 18+ check at onboarding a user must claim to be *older* than they are. If such a user later tried to enter their real (underage) birthDate via an edit endpoint, re-validation would reject it — the edit cannot be used to further bypass the age gate in that direction.
+
+The real reasons for excluding it are:
+
+1. **Displayed age is a trust signal between matched users, not just a safety gate.** In this product, users are matched with and talk to each other. Allowing arbitrary self-service birthDate changes lets users misrepresent their age within the 18+ space (e.g. a 40-year-old presenting as 24). This is a deception-within-the-platform concern that sits above and beyond the age verification gate.
+
+2. **Typo corrections are rare and warrant a higher-trust correction path.** If a user entered the wrong birth year at onboarding and both dates satisfy 18+, the correction is display-only and low-stakes — but still a change to a field that affects match signals and trust. Admin/support correction produces an auditable record; self-service does not.
+
+**birthDate remains editable only via direct database intervention by a support administrator.**
