@@ -29,11 +29,12 @@ export class ZegoTokenService {
 
   /**
    * Generates a ZEGOCLOUD Token04 for the given user and room.
-   * The token is room-scoped: it is only valid for this sessionId's room.
    *
-   * Using an empty payload (no privilege restrictions in the token itself).
-   * Access control is enforced at the REST layer — only session participants
-   * receive tokens, so an explicit in-token room restriction is redundant for V1.
+   * The token payload is cryptographically bound to room_id by ZEGOCLOUD itself
+   * (privilege 1 = login, privilege 2 = publish, both enabled). This means the
+   * token is only accepted by ZEGOCLOUD for exactly this room, even if the raw
+   * token were leaked. The existing REST-layer participant check (only session
+   * participants receive tokens) is kept as a defence-in-depth layer.
    */
   generateToken(
     userId: string,
@@ -41,7 +42,11 @@ export class ZegoTokenService {
     effectiveSeconds = DEFAULT_TOKEN_LIFETIME_SECONDS,
   ): string {
     const roomId = deriveRoomId(sessionId);
-    return generateToken04(this.appId, userId, this.serverSecret, effectiveSeconds, roomId);
+    const privilegePayload = JSON.stringify({
+      room_id: roomId,
+      privilege: { 1: 1, 2: 1 },
+    });
+    return generateToken04(this.appId, userId, this.serverSecret, effectiveSeconds, privilegePayload);
   }
 
   /** Generates tokens for both participants in one call — used by the matching engine. */
