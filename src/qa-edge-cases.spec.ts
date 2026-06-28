@@ -1,9 +1,11 @@
 /**
  * Terminal E — QA edge-case verification tests
  *
- * Covers the 5 flagged issues reviewed on 2026-06-25.
+ * Covers the 5 flagged issues reviewed on 2026-06-25, plus Phase 7 additions.
  * Run with: npm test -- --testPathPattern=qa-edge-cases
  */
+
+import { RedisService } from './redis/redis.service';
 
 // ─── Issue 2: Age calculation (UTC) ──────────────────────────────────────────
 // Extracted from profiles.service.ts for direct unit testing.
@@ -167,5 +169,94 @@ describe('Issue 5b — Pagination cursor correctness', () => {
     const { ids } = buildPage(messages, PAGE_SIZE);
     // Desc input [msg-3, msg-2, msg-1] → after reverse → [msg-1, msg-2, msg-3]
     expect(ids).toEqual(['msg-1', 'msg-2', 'msg-3']);
+  });
+});
+
+// ─── Phase 7 #2: RedisService.incr ───────────────────────────────────────────
+// Regression guard: rpush/lrange were previously missing from RedisService and
+// caused a production-path bug. This test catches that class of error for incr.
+
+describe('RedisService — incr method', () => {
+  let service: RedisService;
+  let mockIncr: jest.Mock;
+
+  beforeEach(() => {
+    mockIncr = jest.fn();
+    // Construct without real ConfigService — onModuleInit is never called so
+    // this.client stays unset; we inject a mock directly onto the private field.
+    service = new RedisService({} as any);
+    (service as any).client = { incr: mockIncr };
+  });
+
+  it('exists on the class (method is defined)', () => {
+    expect(typeof service.incr).toBe('function');
+  });
+
+  it('returns 1 on first call for a fresh key', async () => {
+    mockIncr.mockResolvedValue(1);
+    const result = await service.incr('ratelimit:session-message:user-1');
+    expect(result).toBe(1);
+    expect(mockIncr).toHaveBeenCalledWith('ratelimit:session-message:user-1');
+  });
+
+  it('delegates to client.incr with the exact key supplied', async () => {
+    mockIncr.mockResolvedValue(1);
+    await service.incr('some:key');
+    expect(mockIncr).toHaveBeenCalledTimes(1);
+    expect(mockIncr).toHaveBeenCalledWith('some:key');
+  });
+
+  it('returns incrementing values across subsequent calls', async () => {
+    mockIncr.mockResolvedValueOnce(1)
+            .mockResolvedValueOnce(2)
+            .mockResolvedValueOnce(3);
+    expect(await service.incr('k')).toBe(1);
+    expect(await service.incr('k')).toBe(2);
+    expect(await service.incr('k')).toBe(3);
+  });
+});
+
+// ─── Phase 7 #2: session.message rate-limit logic ────────────────────────────
+// Tests the fixed-window decision: when to set the TTL, and when to reject.
+
+function applyRateLimit(
+  count: number,
+  max: number,
+): { exceeded: boolean; setExpiry: boolean } {
+  return { setExpiry: count === 1, exceeded: count > max };
+}
+
+describe('session.message rate-limit — fixed window logic', () => {
+  const MAX = 10;
+
+  it('1st message: sets expiry to start the window, not exceeded', () => {
+    const { setExpiry, exceeded } = applyRateLimit(1, MAX);
+    expect(setExpiry).toBe(true);
+    expect(exceeded).toBe(false);
+  });
+
+  it('2nd message: does not reset expiry (window already running)', () => {
+    const { setExpiry, exceeded } = applyRateLimit(2, MAX);
+    expect(setExpiry).toBe(false);
+    expect(exceeded).toBe(false);
+  });
+
+  it('10th message (exactly at limit): allowed, no expiry reset', () => {
+    const { setExpiry, exceeded } = applyRateLimit(10, MAX);
+    expect(setExpiry).toBe(false);
+    expect(exceeded).toBe(false);
+  });
+
+  it('11th message: rate limit exceeded, message should be rejected', () => {
+    const { setExpiry, exceeded } = applyRateLimit(11, MAX);
+    expect(setExpiry).toBe(false);
+    expect(exceeded).toBe(true);
+  });
+
+  it('expiry is only ever set at count === 1, not at any other count', () => {
+    [0, 2, 3, 9, 10, 11, 100].forEach((n) => {
+      expect(applyRateLimit(n, MAX).setExpiry).toBe(false);
+    });
+    expect(applyRateLimit(1, MAX).setExpiry).toBe(true);
   });
 });

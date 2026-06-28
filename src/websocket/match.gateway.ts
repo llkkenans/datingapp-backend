@@ -36,6 +36,8 @@ export const WS_EVENTS = {
 } as const;
 
 const SESSION_MESSAGE_MAX_LENGTH = 2_000;
+const RATE_LIMIT_MAX_MESSAGES = 10;
+const RATE_LIMIT_WINDOW_SECONDS = 10;
 
 // ─── Payload shapes (Terminal C uses these to parse incoming events) ──────────
 
@@ -223,6 +225,18 @@ export class MatchGateway
       socket.emit(WS_EVENTS.SESSION_MESSAGE_ERROR, {
         sessionId,
         reason: `content exceeds maximum length of ${SESSION_MESSAGE_MAX_LENGTH} characters`,
+      } satisfies SessionMessageErrorPayload);
+      return;
+    }
+
+    // ── Rate limit: 10 messages per 10-second fixed window per user ──────────
+    const rlKey = `ratelimit:session-message:${senderId}`;
+    const count = await this.redis.incr(rlKey);
+    if (count === 1) await this.redis.expire(rlKey, RATE_LIMIT_WINDOW_SECONDS);
+    if (count > RATE_LIMIT_MAX_MESSAGES) {
+      socket.emit(WS_EVENTS.SESSION_MESSAGE_ERROR, {
+        sessionId,
+        reason: 'Too many messages, please slow down',
       } satisfies SessionMessageErrorPayload);
       return;
     }

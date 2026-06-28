@@ -120,6 +120,10 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return this.client.zscore(key, member);
   }
 
+  async incr(key: string): Promise<number> {
+    return this.client.incr(key);
+  }
+
   // ── Atomic helpers ────────────────────────────────────────────────────────
 
   /** SET key value EX ttl NX — returns true if key was set (did not exist). */
