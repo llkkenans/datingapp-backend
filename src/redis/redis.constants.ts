@@ -34,7 +34,9 @@ export const MATCH_ENGINE = {
   CANDIDATES_PER_RUN: 50,            // max users pulled from each queue per tick
   ENGINE_INTERVAL_MS: 3_000,         // how often the engine ticks
   EXPIRY_INTERVAL_MS: 30_000,        // how often the expiry worker ticks
-  REPEAT_MATCH_COOLDOWN_MS: 24 * 60 * 60 * 1_000,  // 24h before same pair can re-match
+  REPEAT_MATCH_COOLDOWN_MS: process.env.NODE_ENV === 'production'
+    ? 24 * 60 * 60 * 1_000                                          // 24h — never shortened in prod
+    : Number(process.env.REPEAT_MATCH_COOLDOWN_MS ?? 60_000),       // 60s default in dev
   NEW_USER_THRESHOLD_DAYS: 7,        // accounts younger than this get a boost
 } as const;
 

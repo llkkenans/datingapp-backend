@@ -51,3 +51,40 @@ The status-field check is kept beneath it to handle already-terminal sessions (E
 - Shrink the worker tick interval (reduces the window but does not eliminate it; still a race)
 - Use a DB-level trigger to auto-update status on expiry (adds infra complexity, same logical race on read)
 - Request-time check (chosen): zero race window, no infra change, single line of logic
+
+---
+
+## D-023 — REPEAT_MATCH_COOLDOWN_MS made configurable for dev environments
+
+**Date:** 2026-06-28
+**Affected constant:** `MATCH_ENGINE.REPEAT_MATCH_COOLDOWN_MS` in `src/redis/redis.constants.ts`
+**Call site:** `src/modules/matching/matching-engine.service.ts` (`batchLoadCandidateData`)
+
+### Context
+
+The 24h repeat-match cooldown (defined as part of the matching algorithm, CLAUDE.md §Matching Algorithm V1) is correct product behaviour for production — it prevents the same pair from being matched again within 24 hours, which avoids gaming and repetitive pairing. The logic itself is unchanged.
+
+During live development testing, the cooldown blocked re-testing the matching flow after every session ended, because the same small set of test accounts quickly accumulated ENDED sessions with each other. After 1–2 test sessions, no pair in the test pool could be matched for 24 hours.
+
+### Change
+
+`REPEAT_MATCH_COOLDOWN_MS` is now environment-gated:
+
+```typescript
+REPEAT_MATCH_COOLDOWN_MS: process.env.NODE_ENV === 'production'
+  ? 24 * 60 * 60 * 1_000                                        // 24h — never shortened in prod
+  : Number(process.env.REPEAT_MATCH_COOLDOWN_MS ?? 60_000),     // 60s default in dev
+```
+
+- **`NODE_ENV=production`**: always 24h, hardcoded — the env var override is ignored entirely.
+- **`NODE_ENV` unset or anything other than `'production'`**: defaults to 60 seconds, overridable via `REPEAT_MATCH_COOLDOWN_MS` env var if a different value is needed for a specific test.
+
+### Safety constraint
+
+The production guard is `=== 'production'` (strict equality). Any value other than the string `'production'` — including unset, `'staging'`, `'test'`, `'development'` — uses the dev path. This means staging and CI also get the short default unless `NODE_ENV=production` is explicitly set, which is intentional: test environments should not have 24h pairing cooldowns.
+
+### Alternatives considered
+
+- Hardcode a shorter cooldown in all environments and revert before deploy (error-prone, easy to forget)
+- Add a separate `DEV_MODE` flag (adds surface area; `NODE_ENV` is the standard signal already)
+- Environment-gate chosen: single source of truth, zero risk to production if `NODE_ENV=production` is set correctly at deploy time
