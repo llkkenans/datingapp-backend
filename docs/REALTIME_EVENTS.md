@@ -1,12 +1,15 @@
 # Realtime Events
 
-WebSocket namespace: `/match`  
+Two WebSocket namespaces:
+- **`/match`** — anonymous match sessions, voice matching, session lifecycle
+- **`/messages`** — permanent conversation messaging and typing indicators
+
 Transport: Socket.IO  
-Auth: client sends `userId` in handshake `auth` object (will be replaced with JWT in Phase 5).
+Auth: JWT sent in handshake `auth` object; verified server-side via `buildWsJwtMiddleware`.
 
 ---
 
-## Event Inventory
+## `/match` Namespace — Event Inventory
 
 | Direction        | Event name               | When                                               |
 |------------------|--------------------------|----------------------------------------------------|
@@ -19,9 +22,17 @@ Auth: client sends `userId` in handshake `auth` object (will be replaced with JW
 | server → client  | `session.message.error`  | Validation or auth rejection for session.message   |
 | client → server  | `session.message`        | Send a message during an active anonymous session  |
 | client → server  | `match.send_like`        | User taps Like during a session                    |
-| client → server  | `typing.start`           | User starts typing (future)                        |
-| client → server  | `typing.stop`            | User stops typing (future)                         |
 | client → server  | `heartbeat`              | Presence keepalive                                 |
+
+## `/messages` Namespace — Event Inventory
+
+| Direction        | Event name               | When                                                      |
+|------------------|--------------------------|-----------------------------------------------------------|
+| server → client  | `message.new`            | A new message arrives in a permanent conversation         |
+| server → client  | `message.read`           | Partner has read up to a given message                    |
+| server → client  | `message.typing`         | Partner started or stopped typing                         |
+| client → server  | `message.typing.start`   | User starts typing in a conversation                      |
+| client → server  | `message.typing.stop`    | User stops typing (send, clear, or inactivity timeout)    |
 
 ---
 
@@ -204,3 +215,36 @@ Session message relay uses `HGETALL match:session:{sessionId}` from Redis rather
 | Postgres | not written | written via MessagesService |
 
 Anonymous in-session messages are relay-only. They vanish when the connection drops or the session ends. This is intentional — the product model is "talk first, reveal later," and history before mutual like would undermine anonymity.
+
+---
+
+## Typing Indicators (`/messages` namespace)
+
+### `message.typing.start` / `message.typing.stop` — client → server
+
+Sent by the Flutter client on the `/messages` namespace when the user starts or stops typing in a permanent conversation. Flutter **must debounce** these events — `typing.start` fires once when the user begins typing, not on every keystroke; `typing.stop` fires once on send or after a short inactivity timeout.
+
+```json
+{ "conversationId": "uuid" }
+```
+
+**Validation rules (server-side, silent drop on failure):**
+- Sender must be authenticated (socket registered via JWT middleware).
+- `conversationId` must be a non-empty string.
+- Sender must be `userAId` or `userBId` in the Conversation row (Postgres lookup).
+
+Invalid events are silently dropped — no error event is emitted back (typing indicators are fire-and-forget).
+
+### `message.typing` — server → client
+
+Relayed to the **other** participant only. Not persisted anywhere.
+
+```json
+{
+  "conversationId": "uuid",
+  "userId": "uuid-of-the-typing-user",
+  "isTyping": true
+}
+```
+
+`isTyping: true` for `typing.start` relay; `isTyping: false` for `typing.stop` relay.
