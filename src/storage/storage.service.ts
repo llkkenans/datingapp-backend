@@ -57,7 +57,7 @@ export class StorageService implements OnModuleInit {
     }
   }
 
-  // ─── Upload ───────────────────────────────────────────────────────────────
+  // ─── Upload / Delete ──────────────────────────────────────────────────────
 
   async uploadFile(
     bucket: string,
@@ -79,5 +79,24 @@ export class StorageService implements OnModuleInit {
 
     const { data } = this.client.storage.from(bucket).getPublicUrl(path);
     return data.publicUrl;
+  }
+
+  async deleteFile(bucket: string, path: string): Promise<void> {
+    const { error } = await this.client.storage.from(bucket).remove([path]);
+    if (error) {
+      this.logger.warn(`Storage delete failed [${bucket}/${path}]: ${error.message}`);
+    }
+  }
+
+  /**
+   * Extracts the storage path from a Supabase public URL.
+   * URL format: .../storage/v1/object/public/{bucket}/{path}
+   * Returns null if the URL doesn't match the expected pattern.
+   */
+  extractStoragePath(bucket: string, publicUrl: string): string | null {
+    const marker = `/object/public/${bucket}/`;
+    const idx = publicUrl.indexOf(marker);
+    if (idx === -1) return null;
+    return publicUrl.slice(idx + marker.length);
   }
 }

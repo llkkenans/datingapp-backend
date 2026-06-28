@@ -90,6 +90,10 @@ export class ProfilesController {
     const ext = EXT_MAP[file.mimetype];
     const path = `${userId}/${Date.now()}.${ext}`;
 
+    // Capture old URL before overwriting — needed for cleanup below
+    const existing = await this.profilesService.getProfileByUserId(userId);
+    const oldAvatarUrl = existing?.avatarUrl ?? null;
+
     const avatarUrl = await this.storageService.uploadFile(
       STORAGE_BUCKETS.AVATARS,
       path,
@@ -98,6 +102,15 @@ export class ProfilesController {
     );
 
     await this.profilesService.updateAvatarUrl(userId, avatarUrl);
+
+    // Delete the old file after the new URL is safely persisted.
+    // Failure here is non-fatal — log a warning and let the request succeed.
+    if (oldAvatarUrl) {
+      const oldPath = this.storageService.extractStoragePath(STORAGE_BUCKETS.AVATARS, oldAvatarUrl);
+      if (oldPath) {
+        await this.storageService.deleteFile(STORAGE_BUCKETS.AVATARS, oldPath);
+      }
+    }
 
     return { avatarUrl };
   }
